@@ -1,0 +1,66 @@
+name: Build Flutter APK
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_name:
+        description: 'Nama App'
+        required: true
+        default: 'MyApp'
+      build_type:
+        description: 'Tipe build (debug/release)'
+        required: true
+        default: 'debug'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+
+      - name: Extract source.zip ke folder project
+        run: |
+          rm -rf project
+          mkdir project
+          unzip -o source.zip -d project
+
+          PUBSPEC_DIR=$(find project -name "pubspec.yaml" -exec dirname {} \; | head -n 1)
+          echo "PROJECT_DIR=$PUBSPEC_DIR" >> $GITHUB_ENV
+
+      - name: Flutter pub get
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter pub get
+
+      - name: Setup signing (kalau release)
+        if: ${{ github.event.inputs.build_type == 'release' }}
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          echo "${{ secrets.SIGNING_KEY }}" | base64 -d > android/app/release.keystore
+
+      - name: Build APK Debug
+        if: ${{ github.event.inputs.build_type == 'debug' }}
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: flutter build apk --debug
+
+      - name: Build APK Release
+        if: ${{ github.event.inputs.build_type == 'release' }}
+        working-directory: ${{ env.PROJECT_DIR }}
+        env:
+          RELEASE_KEYSTORE_PATH: release.keystore
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: flutter build apk --release
+
+      - name: Upload APK sebagai artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ github.event.inputs.app_name }}-${{ github.event.inputs.build_type }}
+          path: ${{ env.PROJECT_DIR }}/build/app/outputs/flutter-apk/app-${{ github.event.inputs.build_type }}.apk
